@@ -981,6 +981,8 @@ namespace Microsoft.Azure.ServiceBus.Core
                 {
                     foreach (var amqpMessage in amqpMessages)
                     {
+                        Console.WriteLine($"ONRECEIVEASYNC LINK \"{receiveLink?.Name}\" \"{DateTime.UtcNow}\"");
+
                         if (this.ReceiveMode == ReceiveMode.ReceiveAndDelete)
                         {
                             receiveLink.DisposeDelivery(amqpMessage, true, AmqpConstants.AcceptedOutcome);
@@ -1104,8 +1106,11 @@ namespace Microsoft.Azure.ServiceBus.Core
             var lockTokenGuids = lockTokens.Select(lt => new Guid(lt)).ToArray();
             if (lockTokenGuids.Any(lt => this.requestResponseLockedMessages.Contains(lt)))
             {
+                Console.WriteLine($"IN REQUEST LOCKED LIST - Complete locktoken \"{lockTokens.FirstOrDefault()}\" - Is this message is in the locked list \"{requestResponseLockedMessages.Contains(new Guid(lockTokens.FirstOrDefault()))}\"");
+
                 return this.DisposeMessageRequestResponseAsync(lockTokenGuids, DispositionStatus.Completed);
             }
+
             return this.DisposeMessagesAsync(lockTokenGuids, AmqpConstants.AcceptedOutcome);
         }
 
@@ -1159,12 +1164,16 @@ namespace Microsoft.Azure.ServiceBus.Core
                 var amqpRequestMessage = AmqpRequestMessage.CreateRequest(ManagementConstants.Operations.RenewLockOperation, this.OperationTimeout, null);
                 amqpRequestMessage.Map[ManagementConstants.Properties.LockTokens] = new[] { new Guid(lockToken) };
 
+                
+
                 var amqpResponseMessage = await this.ExecuteRequestResponseAsync(amqpRequestMessage).ConfigureAwait(false);
 
                 if (amqpResponseMessage.StatusCode == AmqpResponseStatusCode.OK)
                 {
                     var lockedUntilUtcTimes = amqpResponseMessage.GetValue<IEnumerable<DateTime>>(ManagementConstants.Properties.Expirations);
                     lockedUntilUtc = lockedUntilUtcTimes.First();
+
+                    //Console.WriteLine($"Renewed locktoken \"{lockToken}\" until \"{lockedUntilUtc}\" - Is this message is in the locked list \"{requestResponseLockedMessages.Contains(new Guid(lockToken))}\"");
                 }
                 else
                 {
@@ -1272,8 +1281,11 @@ namespace Microsoft.Azure.ServiceBus.Core
 
         async Task DisposeMessagesAsync(IEnumerable<Guid> lockTokens, Outcome outcome)
         {
-            if(this.isSessionReceiver)
+            Console.WriteLine($"DISPOSE MESSAGES ASYNC START - Outcome {outcome} locktoken \"{lockTokens.FirstOrDefault()}\"");
+
+            if (this.isSessionReceiver)
             {
+                Console.WriteLine($"SESSION LOCK LOST - DISPOSE MESSAGES ASYNC - Outcome {outcome} locktoken \"{lockTokens.FirstOrDefault()}\"");
                 this.ThrowIfSessionLockLost();
             }
 
@@ -1287,6 +1299,12 @@ namespace Microsoft.Azure.ServiceBus.Core
                 {
                     MessagingEventSource.Log.CreatingNewLink(this.ClientId, this.isSessionReceiver, this.SessionIdInternal, false, this.LinkException);
                     receiveLink = await this.ReceiveLinkManager.GetOrCreateAsync(timeoutHelper.RemainingTime()).ConfigureAwait(false);
+
+                    Console.WriteLine($"DISPOSE MESSAGES CREATED NEW LINK \"{receiveLink?.Name}\" \"{DateTime.UtcNow}\"");
+                }
+                else
+                {
+                    Console.WriteLine($"DISPOSE MESSAGES USE ALREADY OPEN RECIEVE LINK \"{receiveLink?.Name}\" \"{DateTime.UtcNow}\"");
                 }
 
                 var disposeMessageTasks = new Task<Outcome>[deliveryTags.Count];
@@ -1299,7 +1317,12 @@ namespace Microsoft.Azure.ServiceBus.Core
                         this);
                 }
 
+                //Console.WriteLine($"DISPOSE MESSAGES WAIT START \"{DateTime.UtcNow}\"");
+
                 var outcomes = await Task.WhenAll(disposeMessageTasks).ConfigureAwait(false);
+
+                //Console.WriteLine($"DISPOSE MESSAGES WAIT END \"{DateTime.UtcNow}\"");
+
                 Error error = null;
                 foreach (var item in outcomes)
                 {
@@ -1313,6 +1336,7 @@ namespace Microsoft.Azure.ServiceBus.Core
                                 throw new SessionLockLostException(Resources.SessionLockExpiredOnMessageSession);
                             }
 
+                            Console.WriteLine($" MESSAGE LOCK LOST 1 - DISPOSE MESSAGES ASYNC - Outcome {outcome} locktoken \"{lockTokens.FirstOrDefault()}\"");
                             throw new MessageLockLostException(Resources.MessageLockLost);
                         }
 
@@ -1332,10 +1356,15 @@ namespace Microsoft.Azure.ServiceBus.Core
                         throw new SessionLockLostException(Resources.SessionLockExpiredOnMessageSession);
                     }
 
+                    //Console.WriteLine($" MESSAGE LOCK LOST 2 - DISPOSE MESSAGES ASYNC - Outcome {outcome} locktoken \"{lockTokens.FirstOrDefault()}\"");
                     throw new MessageLockLostException(Resources.MessageLockLost);
                 }
 
                 throw AmqpExceptionHelper.GetClientException(exception);
+            }
+            finally
+            {
+                Console.WriteLine($"DISPOSE MESSAGES ASYNC FINISH - Outcome {outcome} locktoken \"{lockTokens.FirstOrDefault()}\"");
             }
         }
 
